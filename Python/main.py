@@ -162,8 +162,8 @@ while running:
                 min_dist_sq_world = dist_sq
                 state["hover_beam_idx"] = i
 
-    screen.fill(COLOR_BACKGROUND_APP) # type: ignore
-    sim_display_surface.fill(COLOR_BACKGROUND_APP) # type: ignore
+    screen.fill(COLOR_BACKGROUND_APP)
+    sim_display_surface.fill(COLOR_BACKGROUND_APP)
 
     main_renderer.draw_simulation_elements(sim_display_surface, state, camera, fonts)
     screen.blit(sim_display_surface, (SIM_AREA_X, SIM_AREA_Y))

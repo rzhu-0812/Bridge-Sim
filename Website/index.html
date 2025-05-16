@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bridge Physics Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#6b7280',
+                        'app-bg': '#f0f9ff',
+                        'grid': '#cbd5e1',
+                        'joint': '#464646',
+                        'beam': '#8b4513',
+                        'anchor': '#166534',
+                        'highlight': '#ef4444',
+                        'selection': '#ef4444',
+                        'load': '#f97316',
+                        'load-text': '#c2410c',
+                        'reaction-text': '#1e40af'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body class="bg-app-bg h-screen flex flex-col overflow-hidden">
+    <div id="toolbar" class="h-12 bg-white flex items-center px-4 shadow-md">
+        <h1 class="text-xl font-bold mr-6">Bridge Simulator</h1>
+        
+        <div class="flex space-x-1">
+            <button id="joint-button" class="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md transition active:bg-primary active:text-white">Joint</button>
+            <button id="beam-button" class="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md transition">Beam</button>
+            <button id="anchor-button" class="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md transition">Anchor</button>
+            <button id="load-button" class="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md transition">Load</button>
+        </div>
+
+        <div class="ml-4 flex space-x-1">
+            <button id="grid-toggle" class="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md transition active:bg-primary active:text-white">Grid</button>
+            <button id="forces-toggle" class="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md transition active:bg-primary active:text-white">Forces</button>
+            <button id="reactions-toggle" class="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md transition active:bg-primary active:text-white">Reactions</button>
+            <button id="tooltip-toggle" class="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md transition active:bg-primary active:text-white">Tooltip</button>
+        </div>
+
+        <div class="ml-auto flex space-x-1">
+            <button id="zoom-in-button" class="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md transition">Zoom+</button>
+            <button id="zoom-out-button" class="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md transition">Zoom-</button>
+            <button id="reset-view-button" class="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md transition">Reset View</button>
+            <button id="help-button" class="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md transition">Help</button>
+        </div>
+    </div>
+
+    <div class="flex flex-1">
+        <div id="sim-container" class="flex-1 relative">
+            <canvas id="simulation-canvas" class="block w-full h-full"></canvas>
+        </div>
+
+        <div id="sidebar" class="w-64 bg-white shadow-lg p-4 flex flex-col">
+            <div class="space-y-4">
+                <div>
+                    <h2 class="text-lg font-bold mb-2">Structure Info</h2>
+                    <div class="text-sm">
+                        <p>Joints: <span id="joint-count" class="font-medium">0</span></p>
+                        <p>Beams: <span id="beam-count" class="font-medium">0</span></p>
+                    </div>
+                </div>
+
+                <div>
+                    <h2 class="text-lg font-bold mb-2">Analysis</h2>
+                    <button id="calculate-button" class="w-full px-3 py-2 bg-primary text-white hover:bg-blue-600 rounded-md transition">Calculate Forces</button>
+                    <div id="calculation-status" class="mt-2 text-sm"></div>
+                </div>
+
+                <div>
+                    <h2 class="text-lg font-bold mb-2">Selected Joint</h2>
+                    <div id="selected-joint-info" class="text-sm">
+                        <p>No joint selected</p>
+                    </div>
+                </div>
+
+                <div>
+                    <h2 class="text-lg font-bold mb-2">Load Control</h2>
+                    <div id="load-controls" class="grid grid-cols-2 gap-2">
+                        <button id="fx-plus-button" class="px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition" disabled>Fx+</button>
+                        <button id="fx-minus-button" class="px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition" disabled>Fx-</button>
+                        <button id="fy-plus-button" class="px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition" disabled>Fy+</button>
+                        <button id="fy-minus-button" class="px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition" disabled>Fy-</button>
+                        <button id="clear-load-button" class="px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded-md col-span-2 disabled:opacity-50 disabled:cursor-not-allowed transition" disabled>Clear Load</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="statusbar" class="h-6 bg-white border-t flex items-center px-4 text-sm text-secondary">
+        <span id="status-message">System ready. Start building or load a structure.</span>
+    </div>
+
+    <div id="help-dialog" class="fixed inset-0 bg-black/50 flex items-center justify-center hidden z-50">
+        <div class="bg-white rounded-lg shadow-lg p-6 w-3/4 max-w-2xl max-h-[80vh] overflow-y-auto">
+            <h2 class="text-xl font-bold mb-4">Bridge Simulator Help</h2>
+            <div class="text-sm space-y-4">
+                <div>
+                    <h3 class="font-bold mb-2">Tools</h3>
+                    <ul class="list-disc pl-5">
+                        <li><strong>Joint:</strong> Click in the simulation area to place a joint.</li>
+                        <li><strong>Beam:</strong> Click two joints to connect them with a beam.</li>
+                        <li><strong>Anchor:</strong> Click a joint to toggle it as a fixed anchor.</li>
+                        <li><strong>Load:</strong> Select a joint, then use load controls to apply forces.</li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h3 class="font-bold mb-2">Controls</h3>
+                    <ul class="list-disc pl-5">
+                        <li><strong>Pan:</strong> Middle-click and drag or hold Space + left-click and drag.</li>
+                        <li><strong>Zoom:</strong> Mouse wheel or Zoom+/- buttons.</li>
+                        <li><strong>Select:</strong> Left-click on a joint.</li>
+                        <li><strong>Delete:</strong> Select a joint and press Delete key.</li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h3 class="font-bold mb-2">Analysis</h3>
+                    <ul class="list-disc pl-5">
+                        <li>Click "Calculate Forces" to analyze the structure.</li>
+                        <li>Red beams are in tension, blue beams in compression.</li>
+                        <li>The color intensity represents the magnitude of force.</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="mt-6 text-right">
+                <button id="close-help-button" class="px-4 py-2 bg-primary text-white rounded-md hover:bg-blue-600 transition">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="tooltip" class="fixed bg-white p-2 rounded-md shadow-lg text-sm hidden z-40"></div>
+
+    <script src="js/config.js"></script>
+    <script src="js/camera.js"></script>
+    <script src="js/joint.js"></script>
+    <script src="js/beam.js"></script>
+    <script src="js/physics.js"></script>
+    <script src="js/renderer.js"></script>
+    <script src="js/input.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html> 
