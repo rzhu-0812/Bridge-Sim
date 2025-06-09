@@ -182,6 +182,13 @@ export default function BridgeSimPage() {
     }
   }, [simResetStructure, handleJointSelectedForLoad]);
 
+  const resetCanvasView = useCallback(() => {
+    if (typeof (window as any).canvasResetView === "function") {
+      (window as any).canvasResetView();
+      setZoomLevel(100);
+    }
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (
@@ -202,6 +209,10 @@ export default function BridgeSimPage() {
         event.preventDefault();
         resetStructure();
       }
+      if (event.key.toLowerCase() === "v") {
+        event.preventDefault();
+        resetCanvasView();
+      }
       if (
         (event.key.toLowerCase() === "delete" ||
           event.key.toLowerCase() === "backspace") &&
@@ -219,6 +230,7 @@ export default function BridgeSimPage() {
     undoAction,
     resetStructure,
     deleteSelected,
+    resetCanvasView,
   ]);
 
   const structureInfo = useMemo<StructureInfo>(
@@ -257,11 +269,7 @@ export default function BridgeSimPage() {
   );
 
   return (
-    <div
-      className={`${
-        isDarkMode ? "bg-slate-900" : "bg-gray-50"
-      } flex flex-col h-screen overflow-hidden antialiased`}
-    >
+    <div className="bg-gray-50 dark:bg-slate-900 flex flex-col h-screen overflow-hidden antialiased">
       <Header
         currentTool={currentTool}
         setCurrentTool={handleSetCurrentTool}
@@ -273,13 +281,7 @@ export default function BridgeSimPage() {
         selectedElementForDelete={selectedElement}
       />
       <div className="flex flex-grow overflow-hidden">
-        <div
-          className={`flex-grow relative ${
-            isDarkMode
-              ? "bg-gradient-to-br from-slate-800 to-slate-900"
-              : "bg-gradient-to-br from-gray-100 to-gray-200"
-          }`}
-        >
+        <div className="flex-grow relative bg-gradient-to-br from-gray-100 to-gray-200 dark:from-slate-800 dark:to-slate-900">
           <BridgeCanvas
             simulationState={simulationState}
             currentTool={currentTool}
@@ -294,25 +296,11 @@ export default function BridgeSimPage() {
             reportStatus={reportCanvasStatus}
             selectedElement={selectedElement}
           />
-          <div
-            className={`absolute top-4 left-4 ${
-              isDarkMode
-                ? "bg-slate-800/90 border-slate-700"
-                : "bg-white/90 border-gray-200"
-            } backdrop-blur-sm rounded-xl p-3 shadow-xl border`}
-          >
-            <div
-              className={`text-xs ${
-                isDarkMode ? "text-slate-400" : "text-gray-500"
-              } mb-1`}
-            >
+          <div className="absolute top-4 left-4 bg-white/90 dark:bg-slate-800/90 border-gray-200 dark:border-slate-700 backdrop-blur-sm rounded-xl p-3 shadow-xl border">
+            <div className="text-xs text-gray-500 dark:text-slate-400 mb-1">
               Current Tool
             </div>
-            <div
-              className={`text-sm font-medium ${
-                isDarkMode ? "text-white" : "text-gray-800"
-              } capitalize`}
-            >
+            <div className="text-sm font-medium text-gray-800 dark:text-white capitalize">
               {currentTool}
             </div>
           </div>
@@ -328,7 +316,7 @@ export default function BridgeSimPage() {
           setDisplayOptions={setDisplayOptions}
           zoomIn={zoomIn}
           zoomOut={zoomOut}
-          resetView={resetStructure}
+          resetView={resetCanvasView}
           zoomLevel={zoomLevel}
           isDarkMode={isDarkMode}
         />

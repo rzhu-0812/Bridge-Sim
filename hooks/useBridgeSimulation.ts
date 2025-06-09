@@ -15,21 +15,32 @@ function isStructureFullyConnected(numJoints: number, beams: Beam[]): boolean {
       adj[joint2_idx].push(joint1_idx);
     }
   });
-  if (numJoints > 0 && !(0 in adj) && beams.length > 0) {
-    let jointZeroConnected = false;
-    for (const beam of beams) {
-      if (beam.joint1_idx === 0 || beam.joint2_idx === 0) {
-        jointZeroConnected = true;
-        break;
+
+  let startNode = 0;
+  if (numJoints > 0) {
+    if (!adj[0] || adj[0].length === 0) {
+      let foundStartable = false;
+      for (let i = 0; i < numJoints; i++) {
+        if (adj[i] && adj[i].length > 0) {
+          startNode = i;
+          foundStartable = true;
+          break;
+        }
+      }
+      if (!foundStartable && numJoints > 0) {
+      } else if (!foundStartable && numJoints === 0) {
+        return true;
       }
     }
-    if (!jointZeroConnected && numJoints > 1) return false;
-  } else if (numJoints > 0 && beams.length === 0 && numJoints > 1) {
-    return false;
+  } else {
+    return true;
   }
 
-  const stack: number[] = [0];
-  if (numJoints > 0) visited.add(0);
+  const stack: number[] = [];
+  if (numJoints > 0) {
+    stack.push(startNode);
+    visited.add(startNode);
+  }
 
   let head = 0;
   while (head < stack.length) {
@@ -54,19 +65,18 @@ function areAllJointsReachableFromAnchors(
   const anchorIndices = joints
     .map((j, i) => (j.anchor_type !== null ? i : -1))
     .filter((i) => i !== -1);
+
   if (anchorIndices.length === 0 && numJoints > 0) {
     return {
       reachable: false,
       problematicUnreachable: Array.from({ length: numJoints }, (_, i) => i),
     };
   }
+
   const allJointsAreAnchors = joints.every((j) => j.anchor_type !== null);
-  if (
-    numJoints > 0 &&
-    allJointsAreAnchors &&
-    numJoints === anchorIndices.length
-  )
+  if (allJointsAreAnchors) {
     return { reachable: true };
+  }
 
   const adj: Record<number, number[]> = {};
   for (let i = 0; i < numJoints; i++) adj[i] = [];
@@ -167,8 +177,7 @@ export function useBridgeSimulation() {
       const numJoints = currentJoints.length;
       const numBeams = currentBeams.length;
 
-      const newCalculatedReactions: SimulationState["calculated_reactions"] =
-        {};
+      let newCalculatedReactions: SimulationState["calculated_reactions"] = {};
       let newCalculationSuccess = false;
       let newLastFailureReason = "System ready. Start building.";
       let newProblematicJointIndices: number[] = [];
@@ -179,20 +188,21 @@ export function useBridgeSimulation() {
       }));
 
       const markAllJointsProblematic = () => {
-        jointsWithProblematicFlag.forEach((j) => (j.problematic = true));
-        newProblematicJointIndices = Array.from(
-          { length: numJoints },
-          (_, i) => i
-        );
+        newProblematicJointIndices = [];
+        jointsWithProblematicFlag.forEach((j, idx) => {
+          j.problematic = true;
+          newProblematicJointIndices.push(idx);
+        });
       };
       const markSpecificJointsProblematic = (indices: number[]) => {
+        const currentProblematicSet = new Set(newProblematicJointIndices);
         indices.forEach((idx) => {
-          if (idx < numJoints)
+          if (idx >= 0 && idx < numJoints) {
             jointsWithProblematicFlag[idx].problematic = true;
+            currentProblematicSet.add(idx);
+          }
         });
-        newProblematicJointIndices = [
-          ...new Set([...newProblematicJointIndices, ...indices]),
-        ];
+        newProblematicJointIndices = Array.from(currentProblematicSet);
       };
 
       if (numJoints === 0) {
@@ -201,7 +211,7 @@ export function useBridgeSimulation() {
           beams: [],
           calculated_reactions: {},
           calculation_success: true,
-          last_failure_reason: "System empty.",
+          last_failure_reason: "System empty. Add joints and beams.",
           problematic_joint_indices: [],
         };
       }
@@ -220,34 +230,43 @@ export function useBridgeSimulation() {
             (j) => j.anchor_type !== null
           );
           if (allJointsAreAnchors) {
+            newLastFailureReason =
+              "Structure consists only of anchors (no beams). Static if loads are balanced by reactions.";
+            newCalculationSuccess = true;
             jointsWithProblematicFlag.forEach((joint, idx) => {
               if (joint.anchor_type) {
                 const reaction: { rx?: number; ry?: number } = {};
                 if (
-                  joint.anchor_type === "pin" ||
-                  joint.anchor_type === "roller_y"
-                )
-                  reaction.rx = -joint.load[0];
-                if (
-                  joint.anchor_type === "pin" ||
-                  joint.anchor_type === "roller_x"
-                )
-                  reaction.ry = -joint.load[1];
+                  Math.abs(joint.load[0]) > FLOAT_TOLERANCE ||
+                  Math.abs(joint.load[1]) > FLOAT_TOLERANCE
+                ) {
+                  if (
+                    joint.anchor_type === "pin" ||
+                    joint.anchor_type === "roller_y"
+                  )
+                    reaction.rx = -joint.load[0];
+                  if (
+                    joint.anchor_type === "pin" ||
+                    joint.anchor_type === "roller_x"
+                  )
+                    reaction.ry = -joint.load[1];
+                }
                 if (Object.keys(reaction).length > 0)
                   newCalculatedReactions[idx] = reaction;
               }
             });
-            newLastFailureReason =
-              "Reactions approximated for isolated anchors (no beams).";
-            newCalculationSuccess = true;
           } else {
             newLastFailureReason =
-              "Structure has no beams. Floating joints or isolated anchors present.";
-            markAllJointsProblematic();
+              "Structure has anchors but also floating joints (no beams to connect them).";
+            markSpecificJointsProblematic(
+              jointsWithProblematicFlag
+                .map((j, i) => (j.anchor_type === null ? i : -1))
+                .filter((i) => i !== -1)
+            );
           }
         } else {
           newLastFailureReason =
-            "No beams and no anchors. Structure is floating and unstable.";
+            "No beams and no anchors. Structure is unstable.";
           markAllJointsProblematic();
         }
         return {
@@ -260,10 +279,7 @@ export function useBridgeSimulation() {
         };
       }
 
-      if (
-        numJoints > 1 &&
-        !isStructureFullyConnected(numJoints, beamsWithForces)
-      ) {
+      if (!isStructureFullyConnected(numJoints, beamsWithForces)) {
         newLastFailureReason =
           "Structure is not fully connected. Contains isolated parts or joints.";
         markAllJointsProblematic();
@@ -294,9 +310,10 @@ export function useBridgeSimulation() {
       const coincidentCheck = findCoincidentAnchors(jointsWithProblematicFlag);
       if (coincidentCheck.hasCoincident) {
         newLastFailureReason =
-          "Multiple anchors are at the exact same location, reducing effective support.";
-        if (coincidentCheck.problematicCoincident)
+          "Multiple anchors are at the exact same location, reducing effective support or causing redundancy.";
+        if (coincidentCheck.problematicCoincident) {
           markSpecificJointsProblematic(coincidentCheck.problematicCoincident);
+        }
         return {
           calculated_reactions: {},
           calculation_success: false,
@@ -314,9 +331,11 @@ export function useBridgeSimulation() {
       if (!reachability.reachable) {
         newLastFailureReason =
           "Not all parts of the structure are connected to an anchor. Contains floating sections.";
-        if (reachability.problematicUnreachable)
+        if (reachability.problematicUnreachable) {
           markSpecificJointsProblematic(reachability.problematicUnreachable);
-        else markAllJointsProblematic();
+        } else {
+          markAllJointsProblematic();
+        }
         return {
           calculated_reactions: {},
           calculation_success: false,
@@ -328,25 +347,26 @@ export function useBridgeSimulation() {
       }
 
       let numReactionUnknowns = 0;
-      let providesGlobalRx = false;
-      let providesGlobalRy = false;
       anchorsWithType.forEach((anchor) => {
-        if (anchor.type === "pin") {
-          numReactionUnknowns += 2;
-          providesGlobalRx = true;
-          providesGlobalRy = true;
-        } else if (anchor.type === "roller_x") {
-          numReactionUnknowns += 1;
-          providesGlobalRy = true;
-        } else if (anchor.type === "roller_y") {
-          numReactionUnknowns += 1;
-          providesGlobalRx = true;
-        }
+        if (anchor.type === "pin") numReactionUnknowns += 2;
+        else if (anchor.type === "roller_x") numReactionUnknowns += 1;
+        else if (anchor.type === "roller_y") numReactionUnknowns += 1;
       });
 
-      if (numReactionUnknowns < 3 && numJoints > 1 && numBeams > 0) {
-        newLastFailureReason = `Insufficient reactions (${numReactionUnknowns}) to ensure global stability for a non-trivial structure. Need at least 3 for a general 2D truss.`;
-        markAllJointsProblematic();
+      let providesGlobalRx = false;
+      let providesGlobalRy = false;
+      let providesMomentResistance = numAnchorJoints >= 2;
+
+      anchorsWithType.forEach((anchor) => {
+        if (anchor.type === "pin" || anchor.type === "roller_y")
+          providesGlobalRx = true;
+        if (anchor.type === "pin" || anchor.type === "roller_x")
+          providesGlobalRy = true;
+      });
+
+      if (numReactionUnknowns < 3) {
+        newLastFailureReason = `Insufficient reactions (${numReactionUnknowns}) to ensure global stability. Need at least 3 for a general 2D truss (e.g., pin and roller, or 3 rollers not collinear/concurrent).`;
+        markSpecificJointsProblematic(anchorsWithType.map((a) => a.index));
         return {
           calculated_reactions: {},
           calculation_success: false,
@@ -356,9 +376,15 @@ export function useBridgeSimulation() {
           joints: jointsWithProblematicFlag,
         };
       }
-      if (numBeams > 0 && !(providesGlobalRx && providesGlobalRy)) {
-        newLastFailureReason = `Structure lacks ability to resist forces in both X and Y directions globally.`;
-        markAllJointsProblematic();
+      if (!(providesGlobalRx && providesGlobalRy && providesMomentResistance)) {
+        let issues = [];
+        if (!providesGlobalRx) issues.push("resist X-direction forces");
+        if (!providesGlobalRy) issues.push("resist Y-direction forces");
+        if (!providesMomentResistance) issues.push("resist rotation (moment)");
+        newLastFailureReason = `Structure lacks ability to ${issues.join(
+          " and "
+        )} globally.`;
+        markSpecificJointsProblematic(anchorsWithType.map((a) => a.index));
         return {
           calculated_reactions: {},
           calculation_success: false,
@@ -375,8 +401,10 @@ export function useBridgeSimulation() {
       if (totalUnknowns !== totalEquations) {
         newLastFailureReason = `System is not statically determinate by count. Equations: ${totalEquations}, Unknowns (beams + reactions): ${totalUnknowns}.`;
         if (totalUnknowns < totalEquations)
-          newLastFailureReason += " (Likely a mechanism).";
-        else newLastFailureReason += " (Likely statically indeterminate).";
+          newLastFailureReason += " (Likely a mechanism / unstable).";
+        else
+          newLastFailureReason +=
+            " (Likely statically indeterminate; this solver handles determinate systems).";
         markAllJointsProblematic();
         return {
           calculated_reactions: newCalculatedReactions,
@@ -391,13 +419,14 @@ export function useBridgeSimulation() {
       const A: number[][] = Array(totalEquations)
         .fill(null)
         .map(() => Array(totalUnknowns).fill(0));
-      const b: number[] = Array(totalEquations).fill(0);
+      const b_vec: number[] = Array(totalEquations).fill(0);
 
       const jointToReactionMatrixIndices: Record<
         number,
         { rx?: number; ry?: number }
       > = {};
       let currentReactionUnknownIdx = numBeams;
+
       anchorsWithType.forEach((anchor) => {
         const jointIdx = anchor.index;
         jointToReactionMatrixIndices[jointIdx] = {};
@@ -419,8 +448,8 @@ export function useBridgeSimulation() {
         const joint = jointsWithProblematicFlag[i];
         const eqX = 2 * i;
         const eqY = 2 * i + 1;
-        b[eqX] = -joint.load[0];
-        b[eqY] = -joint.load[1];
+        b_vec[eqX] = -joint.load[0];
+        b_vec[eqY] = -joint.load[1];
 
         if (joint.anchor_type) {
           const reactionMapping = jointToReactionMatrixIndices[i];
@@ -434,13 +463,20 @@ export function useBridgeSimulation() {
           else if (beam.joint2_idx === i) otherJointIdx = beam.joint1_idx;
 
           if (otherJointIdx !== -1) {
+            if (otherJointIdx >= numJoints || otherJointIdx < 0) {
+              newLastFailureReason = `Beam ${beamIdx} connects to an invalid joint index.`;
+              markSpecificJointsProblematic([i]);
+              return {};
+            }
             const otherJoint = jointsWithProblematicFlag[otherJointIdx];
             const dx = otherJoint.x - joint.x;
             const dy = otherJoint.y - joint.y;
             const length = Math.sqrt(dx * dx + dy * dy);
+
             if (length < FLOAT_TOLERANCE) {
-              newLastFailureReason = `Beam ${beamIdx} (Joints ${i}-${otherJointIdx}) has zero length.`;
+              newLastFailureReason = `Beam ${beamIdx} (Joints ${i}-${otherJointIdx}) has zero length or connects coincident joints.`;
               markSpecificJointsProblematic([i, otherJointIdx]);
+
               return {
                 calculated_reactions: {},
                 calculation_success: false,
@@ -456,27 +492,41 @@ export function useBridgeSimulation() {
         });
       }
 
-      const solution = solveLinearSystem(A, b);
+      if (newLastFailureReason.includes("has zero length")) {
+        return {
+          calculated_reactions: {},
+          calculation_success: false,
+          last_failure_reason: newLastFailureReason,
+          problematic_joint_indices: newProblematicJointIndices,
+          beams: beamsWithForces,
+          joints: jointsWithProblematicFlag,
+        };
+      }
+
+      const solution = solveLinearSystem(A, b_vec);
 
       if (solution) {
         newCalculationSuccess = true;
         newLastFailureReason = "Structural analysis successful.";
-        for (let i = 0; i < numBeams; i++)
+        for (let i = 0; i < numBeams; i++) {
           beamsWithForces[i].force = solution[i];
+        }
 
         anchorsWithType.forEach((anchor) => {
           const jointIdx = anchor.index;
           const reactionMapping = jointToReactionMatrixIndices[jointIdx];
           newCalculatedReactions[jointIdx] = {};
-          if (reactionMapping.rx !== undefined)
+          if (reactionMapping.rx !== undefined) {
             newCalculatedReactions[jointIdx].rx = solution[reactionMapping.rx];
-          if (reactionMapping.ry !== undefined)
+          }
+          if (reactionMapping.ry !== undefined) {
             newCalculatedReactions[jointIdx].ry = solution[reactionMapping.ry];
+          }
         });
       } else {
         newCalculationSuccess = false;
         newLastFailureReason =
-          "Analysis failed: Matrix solution failed. Structure may be unstable or indeterminate due to geometry or support configuration.";
+          "Analysis failed: Matrix solution failed. Structure may be unstable (mechanism) or indeterminate due to geometry/support configuration.";
         markAllJointsProblematic();
       }
 
@@ -496,6 +546,7 @@ export function useBridgeSimulation() {
     (newJoints: Joint[], newBeams: Beam[]) => {
       historyRef.current.push({ ...simulationState });
       if (historyRef.current.length > 20) historyRef.current.shift();
+
       const calculationResult = runCalculations(newJoints, newBeams);
       setSimulationState((prevState) => ({
         ...prevState,
@@ -503,7 +554,9 @@ export function useBridgeSimulation() {
         beams: calculationResult.beams || newBeams,
         calculated_reactions: calculationResult.calculated_reactions || {},
         calculation_success: calculationResult.calculation_success || false,
-        last_failure_reason: calculationResult.last_failure_reason || "Error.",
+        last_failure_reason:
+          calculationResult.last_failure_reason ||
+          "Error during recalculation.",
         problematic_joint_indices:
           calculationResult.problematic_joint_indices || [],
       }));
@@ -518,6 +571,21 @@ export function useBridgeSimulation() {
       isAnchorInitially: boolean,
       initialAnchorTypeIfAnchor: AnchorType | null = "pin"
     ) => {
+      const existingJointAtLocation = simulationState.joints.find(
+        (joint) =>
+          Math.abs(joint.x - x) < FLOAT_TOLERANCE &&
+          Math.abs(joint.y - y) < FLOAT_TOLERANCE
+      );
+
+      if (existingJointAtLocation) {
+        setSimulationState((prev) => ({
+          ...prev,
+          last_failure_reason:
+            "Cannot add joint: A joint already exists at this location.",
+        }));
+        return;
+      }
+
       const newJoint: Joint = {
         x,
         y,
@@ -535,6 +603,8 @@ export function useBridgeSimulation() {
 
   const toggleAnchor = useCallback(
     (joint_idx: number) => {
+      if (joint_idx < 0 || joint_idx >= simulationState.joints.length) return;
+
       const newJoints = simulationState.joints.map((joint, idx) => {
         if (idx === joint_idx) {
           let nextAnchorType: AnchorType | null = null;
@@ -561,9 +631,22 @@ export function useBridgeSimulation() {
 
   const setLoad = useCallback(
     (joint_idx: number, fx: number, fy: number) => {
+      if (joint_idx < 0 || joint_idx >= simulationState.joints.length) return;
+
       let loadChanged = false;
+      const currentJoint = simulationState.joints[joint_idx];
+
+      if (currentJoint.anchor_type !== null) {
+        setSimulationState((prev) => ({
+          ...prev,
+          last_failure_reason:
+            "Loads cannot be applied directly to anchor joints.",
+        }));
+        return;
+      }
+
       const newJoints = simulationState.joints.map((joint, idx) => {
-        if (idx === joint_idx && joint.anchor_type === null) {
+        if (idx === joint_idx) {
           if (joint.load[0] !== fx || joint.load[1] !== fy) {
             loadChanged = true;
           }
@@ -571,13 +654,9 @@ export function useBridgeSimulation() {
         }
         return joint;
       });
+
       if (loadChanged) {
         updateStateAndRecalculate(newJoints, simulationState.beams);
-      } else if (simulationState.joints[joint_idx]?.anchor_type !== null) {
-        setSimulationState((prev) => ({
-          ...prev,
-          last_failure_reason: "Loads cannot be applied to anchor joints.",
-        }));
       }
     },
     [simulationState.joints, simulationState.beams, updateStateAndRecalculate]
@@ -585,6 +664,12 @@ export function useBridgeSimulation() {
 
   const deleteJoint = useCallback(
     (jointIdxToDelete: number) => {
+      if (
+        jointIdxToDelete < 0 ||
+        jointIdxToDelete >= simulationState.joints.length
+      )
+        return;
+
       const newJoints = simulationState.joints.filter(
         (_, idx) => idx !== jointIdxToDelete
       );
@@ -607,11 +692,24 @@ export function useBridgeSimulation() {
         }));
       updateStateAndRecalculate(newJoints, newBeams);
     },
-    [simulationState, updateStateAndRecalculate]
+    [simulationState.joints, simulationState.beams, updateStateAndRecalculate]
   );
 
   const addBeam = useCallback(
     (joint1_idx: number, joint2_idx: number) => {
+      if (
+        joint1_idx < 0 ||
+        joint1_idx >= simulationState.joints.length ||
+        joint2_idx < 0 ||
+        joint2_idx >= simulationState.joints.length
+      ) {
+        setSimulationState((prev) => ({
+          ...prev,
+          last_failure_reason: "Invalid joint index for beam.",
+        }));
+        return;
+      }
+
       if (joint1_idx === joint2_idx) {
         setSimulationState((prev) => ({
           ...prev,
@@ -637,17 +735,22 @@ export function useBridgeSimulation() {
         newBeam,
       ]);
     },
-    [simulationState, updateStateAndRecalculate]
+    [simulationState.joints, simulationState.beams, updateStateAndRecalculate]
   );
 
   const deleteBeam = useCallback(
     (beamIdxToDelete: number) => {
+      if (
+        beamIdxToDelete < 0 ||
+        beamIdxToDelete >= simulationState.beams.length
+      )
+        return;
       const newBeams = simulationState.beams.filter(
         (_, idx) => idx !== beamIdxToDelete
       );
       updateStateAndRecalculate(simulationState.joints, newBeams);
     },
-    [simulationState, updateStateAndRecalculate]
+    [simulationState.joints, simulationState.beams, updateStateAndRecalculate]
   );
 
   const resetStructure = useCallback(() => {
@@ -658,20 +761,20 @@ export function useBridgeSimulation() {
 
   const undoLastAction = useCallback(() => {
     if (historyRef.current.length > 0) {
-      const prevState = historyRef.current.pop();
-      if (prevState) {
+      const prevStateFromHistory = historyRef.current.pop();
+      if (prevStateFromHistory) {
         const calculationResult = runCalculations(
-          prevState.joints,
-          prevState.beams
+          prevStateFromHistory.joints,
+          prevStateFromHistory.beams
         );
         setSimulationState({
-          ...prevState,
-          joints: calculationResult.joints || prevState.joints,
-          beams: calculationResult.beams || prevState.beams,
+          ...prevStateFromHistory,
+          joints: calculationResult.joints || prevStateFromHistory.joints,
+          beams: calculationResult.beams || prevStateFromHistory.beams,
           calculated_reactions: calculationResult.calculated_reactions || {},
           calculation_success: calculationResult.calculation_success || false,
           last_failure_reason:
-            calculationResult.last_failure_reason || "State restored.",
+            calculationResult.last_failure_reason || "State restored via undo.",
           problematic_joint_indices:
             calculationResult.problematic_joint_indices || [],
         });
